@@ -1,0 +1,11 @@
+{
+    "sqltools.connections": [
+        {
+            "previewLimit": 50,
+            "driver": "SQLite",
+            "name": "git_commits",
+            "database": "${workspaceFolder:git_info_llama}/example.db"
+        }
+    ],
+    "sqltools.useNodeRuntime": true
+}
