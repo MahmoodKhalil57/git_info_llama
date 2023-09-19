@@ -72,7 +72,7 @@ fn create_database(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute(
         "CREATE TABLE commit_relation (
             parent TEXT NOT NULL,
-            chilod TEXT NOT NULL,
+            child TEXT NOT NULL,
             PRIMARY KEY (parent, child)
         )",
         {},
