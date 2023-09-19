@@ -158,7 +158,7 @@ fn batch_insert_commits(conn: &mut Connection, commits: &Vec<CommitDetails>) -> 
 fn batch_insert_refs(conn: &mut Connection, refs: &Vec<RefDetails>) -> Result<()> {
     let chunk_size = 50;
 
-    let insert_sql = "INSERT INTO commit_details (id, name, kind) VALUES (?1, ?2, ?3)";
+    let insert_sql = "INSERT INTO ref_details (id, name, kind) VALUES (?1, ?2, ?3)";
 
     for chunk in refs.chunks(chunk_size) {
         let tx = conn.transaction()?; // Begin a new transaction
