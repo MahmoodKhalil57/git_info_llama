@@ -20,13 +20,9 @@ fn main() {
         }
     }
 
-    let mut commits: Vec<CommitDetails> = Vec::new();
-    get_commits_detail_array(&mut commits);
-    let _ = batch_insert_commits(&mut conn, &commits);
+    get_commits_detail_array(&mut conn);
 
-    let mut refs: Vec<RefDetails> = Vec::new();
-    get_ref_details(&mut refs);
-    let _ = batch_insert_refs(&mut conn, &refs);
+    get_ref_details(&mut conn);
 }
 
 struct CommitDetails {
@@ -65,41 +61,29 @@ fn create_database(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-fn get_commits_detail_array(commits: &mut Vec<CommitDetails>) {
-    // Get the current directory.
+fn get_commits_detail_array(conn: &mut Connection) {
     let path = env::current_dir().unwrap();
-
     let repo = Repository::open(&path).expect("Failed to open the repository.");
 
-    // Create an iterator over all the commits.
     let mut revwalk = repo.revwalk().expect("Failed to get revwalk.");
     revwalk.push_head().expect("Failed to push head.");
 
-    // Iterate over all the commits and print them.
-    for oid in revwalk {
-        match oid {
-            Ok(oid) => {
-                let commit = repo.find_commit(oid).expect("Failed to find commit.");
-                let formatted_commit = extract_commit_details(&commit);
-                commits.push(formatted_commit);
-            }
-            Err(e) => println!("Failed to process commit: {}", e),
-        }
-    }
-}
+    let all_commits: Vec<_> = revwalk.collect();
 
-fn get_ref_details(refs: &mut Vec<RefDetails>) {
-    let path = env::current_dir().unwrap();
-    let repo = Repository::open(&path).expect("Failed to open the repository.");
+    for chunk in all_commits.chunks(50) {
+        let mut chunk_commits = Vec::new();
 
-    for reference in repo.references().expect("Failed to get references.") {
-        match reference {
-            Ok(reference) => {
-                let formatted_refs = extract_ref_details(&reference);
-                refs.push(formatted_refs);
+        for oid in chunk {
+            match oid {
+                Ok(oid) => {
+                    let commit = repo.find_commit(*oid).expect("Failed to find commit.");
+                    let formatted_commit = extract_commit_details(&commit);
+                    chunk_commits.push(formatted_commit);
+                }
+                Err(e) => println!("Failed to process commit: {}", e),
             }
-            Err(e) => println!("Failed to process reference: {}", e),
         }
+        batch_insert_commits(conn, &chunk_commits).expect("Failed to insert commits.");
     }
 }
 
@@ -115,22 +99,6 @@ fn extract_commit_details(commit: &Commit) -> CommitDetails {
         date,
         message,
     };
-}
-
-fn extract_ref_details(reference: &Reference) -> RefDetails {
-    let name = reference.name().unwrap_or("").to_string();
-    let id = match reference.target() {
-        Some(target) => target.to_string(),
-        None => String::from("Unknown"),
-    };
-    let kind = match reference.kind() {
-        Some(git2::ReferenceType::Direct) => "Direct",
-        Some(git2::ReferenceType::Symbolic) => "Symbolic",
-        None => "Unknown",
-    }
-    .to_string();
-
-    return RefDetails { id, name, kind };
 }
 
 fn batch_insert_commits(conn: &mut Connection, commits: &Vec<CommitDetails>) -> Result<()> {
@@ -153,6 +121,47 @@ fn batch_insert_commits(conn: &mut Connection, commits: &Vec<CommitDetails>) -> 
     }
 
     Ok(())
+}
+
+fn get_ref_details(conn: &mut Connection) {
+    let path = env::current_dir().unwrap();
+    let repo = Repository::open(&path).expect("Failed to open the repository.");
+
+    let all_references: Vec<_> = repo
+        .references()
+        .expect("Failed to get references.")
+        .collect();
+
+    for chunk in all_references.chunks(50) {
+        let mut chunk_refs = Vec::new();
+
+        for reference_result in chunk {
+            match reference_result {
+                Ok(reference) => {
+                    let formatted_refs = extract_ref_details(&reference);
+                    chunk_refs.push(formatted_refs);
+                }
+                Err(e) => println!("Failed to process reference: {}", e),
+            }
+        }
+        batch_insert_refs(conn, &chunk_refs).expect("Failed to insert references.");
+    }
+}
+
+fn extract_ref_details(reference: &Reference) -> RefDetails {
+    let name = reference.name().unwrap_or("").to_string();
+    let id = match reference.target() {
+        Some(target) => target.to_string(),
+        None => String::from("Unknown"),
+    };
+    let kind = match reference.kind() {
+        Some(git2::ReferenceType::Direct) => "Direct",
+        Some(git2::ReferenceType::Symbolic) => "Symbolic",
+        None => "Unknown",
+    }
+    .to_string();
+
+    return RefDetails { id, name, kind };
 }
 
 fn batch_insert_refs(conn: &mut Connection, refs: &Vec<RefDetails>) -> Result<()> {
