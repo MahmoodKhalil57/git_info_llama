@@ -1,13 +1,30 @@
 extern crate git2;
 extern crate rusqlite;
 
-use git2::{Commit, Reference, Repository};
+use git2::{Commit, Oid, Reference, Repository};
 use rusqlite::{params, Connection, Result};
 use std::env;
 use std::fs;
+use std::path::Path;
+
+fn to_absolute_path<P: AsRef<Path>>(path: P) -> std::io::Result<std::path::PathBuf> {
+    let path = path.as_ref();
+
+    // If the path is already absolute, just return it
+    if path.is_absolute() {
+        Ok(path.to_path_buf())
+    } else {
+        // Combine the current directory with the relative path to get the absolute path
+        Ok(env::current_dir()?.join(path))
+    }
+}
 
 fn main() {
-    let db_path = "example.db";
+    let args: Vec<String> = env::args().collect();
+
+    let repository_path = args.get(1).map_or(".", |s| s.as_str());
+    let db_path = args.get(2).map_or("git_info_llama.db", |s| s.as_str());
+
     let db_exists = fs::metadata(db_path).is_ok();
     let mut conn = Connection::open(db_path).expect("Failed to open database");
 
@@ -20,9 +37,12 @@ fn main() {
         }
     }
 
-    get_commits_detail_array(&mut conn);
+    let path = to_absolute_path(repository_path).expect("Failed to get absolute path.");
+    let repo = Repository::open(&path).expect("Failed to open the repository.");
 
-    get_ref_details(&mut conn);
+    get_commits_detail_array(&mut conn, &repo);
+
+    get_ref_details(&mut conn, &repo);
 }
 
 struct CommitDetails {
@@ -30,6 +50,7 @@ struct CommitDetails {
     author: String,
     date: i64, // UNIX timestamp for simplicity, but can use a more detailed type if desired.
     message: String,
+    parents: Vec<Oid>,
 }
 struct RefDetails {
     name: String,
@@ -61,10 +82,7 @@ fn create_database(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-fn get_commits_detail_array(conn: &mut Connection) {
-    let path = env::current_dir().unwrap();
-    let repo = Repository::open(&path).expect("Failed to open the repository.");
-
+fn get_commits_detail_array(conn: &mut Connection, repo: &Repository) {
     let mut revwalk = repo.revwalk().expect("Failed to get revwalk.");
     revwalk.push_head().expect("Failed to push head.");
 
@@ -92,12 +110,15 @@ fn extract_commit_details(commit: &Commit) -> CommitDetails {
     let author = commit.author().name().unwrap_or("Unknown").to_string();
     let date = commit.time().seconds();
     let message = commit.message().unwrap_or("No message").to_string();
+    //array of parents;
+    let parents = commit.parent_ids().collect::<Vec<_>>();
 
     return CommitDetails {
         id,
         author,
         date,
         message,
+        parents,
     };
 }
 
@@ -123,10 +144,7 @@ fn batch_insert_commits(conn: &mut Connection, commits: &Vec<CommitDetails>) -> 
     Ok(())
 }
 
-fn get_ref_details(conn: &mut Connection) {
-    let path = env::current_dir().unwrap();
-    let repo = Repository::open(&path).expect("Failed to open the repository.");
-
+fn get_ref_details(conn: &mut Connection, repo: &Repository) {
     let all_references: Vec<_> = repo
         .references()
         .expect("Failed to get references.")
