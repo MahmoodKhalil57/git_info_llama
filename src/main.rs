@@ -70,6 +70,15 @@ fn create_database(conn: &Connection) -> rusqlite::Result<()> {
     )?;
 
     conn.execute(
+        "CREATE TABLE commit_relation (
+            parent TEXT NOT NULL,
+            chilod TEXT NOT NULL,
+            PRIMARY KEY (parent, child)
+        )",
+        {},
+    )?;
+
+    conn.execute(
         "CREATE TABLE ref_details (
             name TEXT NOT NULL,
             id TEXT NOT NULL,
@@ -96,6 +105,15 @@ fn get_commits_detail_array(conn: &mut Connection, repo: &Repository) {
                 Ok(oid) => {
                     let commit = repo.find_commit(*oid).expect("Failed to find commit.");
                     let formatted_commit = extract_commit_details(&commit);
+
+                    for parent in &formatted_commit.parents {
+                        conn.execute(
+                            "INSERT INTO commit_relation (parent, child) VALUES (?1, ?2)",
+                            params![parent.to_string(), formatted_commit.id],
+                        )
+                        .expect("Failed to insert commit relation.");
+                    }
+
                     chunk_commits.push(formatted_commit);
                 }
                 Err(e) => println!("Failed to process commit: {}", e),
