@@ -40,9 +40,13 @@ fn main() {
     let path = to_absolute_path(repository_path).expect("Failed to get absolute path.");
     let repo = Repository::open(&path).expect("Failed to open the repository.");
 
+    println!("Getting Commit Details...");
     get_commits_detail_array(&mut conn, &repo);
+    println!("Done!");
 
+    println!("Getting Ref Details...");
     get_ref_details(&mut conn, &repo);
+    println!("Done!");
 }
 
 struct CommitDetails {
@@ -106,14 +110,6 @@ fn get_commits_detail_array(conn: &mut Connection, repo: &Repository) {
                     let commit = repo.find_commit(*oid).expect("Failed to find commit.");
                     let formatted_commit = extract_commit_details(&commit);
 
-                    for parent in &formatted_commit.parents {
-                        conn.execute(
-                            "INSERT INTO commit_relation (parent, child) VALUES (?1, ?2)",
-                            params![parent.to_string(), formatted_commit.id],
-                        )
-                        .expect("Failed to insert commit relation.");
-                    }
-
                     chunk_commits.push(formatted_commit);
                 }
                 Err(e) => println!("Failed to process commit: {}", e),
@@ -141,21 +137,24 @@ fn extract_commit_details(commit: &Commit) -> CommitDetails {
 }
 
 fn batch_insert_commits(conn: &mut Connection, commits: &Vec<CommitDetails>) -> Result<()> {
-    let chunk_size = 50;
-
     let insert_sql =
         "INSERT INTO commit_details (id, author, date, message) VALUES (?1, ?2, ?3, ?4)";
 
-    for chunk in commits.chunks(chunk_size) {
+    for commit in commits {
         let tx = conn.transaction()?; // Begin a new transaction
 
-        for commit in chunk {
+        tx.execute(
+            insert_sql,
+            params![&commit.id, &commit.author, commit.date, &commit.message],
+        )?;
+
+        for parent in &commit.parents {
             tx.execute(
-                insert_sql,
-                params![&commit.id, &commit.author, commit.date, &commit.message],
-            )?;
+                "INSERT INTO commit_relation (parent, child) VALUES (?1, ?2)",
+                params![parent.to_string(), commit.id],
+            )
+            .expect("Failed to insert commit relation.");
         }
-        println!("Committing");
         tx.commit()?; // Commit the transaction
     }
 
@@ -215,7 +214,6 @@ fn batch_insert_refs(conn: &mut Connection, refs: &Vec<RefDetails>) -> Result<()
             )?;
         }
 
-        println!("Committing");
         tx.commit()?; // Commit the transaction
     }
 
